@@ -10,6 +10,7 @@
 {-# LANGUAGE FlexibleInstances    #-}
 {-# LANGUAGE RecordWildCards      #-}
 {-# LANGUAGE ScopedTypeVariables  #-}
+{-# LANGUAGE StandaloneDeriving   #-}
 
 {-# OPTIONS_GHC -Wno-orphans #-}
 
@@ -138,6 +139,8 @@ instance PPrint a => PPrint (AnnInfo a) where
 
 instance PPrint a => Show (AnnInfo a) where
   show = showpp
+
+deriving instance PPrint a => Show (Output a)
 
 pprAnnInfoBinds :: (PPrint a, PPrint b) => F.Tidy -> (SrcSpan, [(Maybe a, b)]) -> Doc
 pprAnnInfoBinds k (l, xvs)

@@ -393,7 +393,7 @@ data TError t =
                 } -- ^ Mismatch in expected/actual args of abstract refinement
 
   | ErrAliasCycle { pos    :: !SrcSpan
-                  , acycle :: ![(SrcSpan, Doc)]
+                  , acycle :: ![(SrcSpan, Doc)] -- TODO: This should be NonEmpty
                   } -- ^ Cyclic Refined Type Alias Definitions
 
   | ErrIllegalAliasApp { pos   :: !SrcSpan

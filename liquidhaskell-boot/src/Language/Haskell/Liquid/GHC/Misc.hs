@@ -270,6 +270,14 @@ srcSpanStartLoc l  = L (srcSpanStartLine l, srcSpanStartCol l)
 srcSpanEndLoc :: RealSrcSpan -> Loc
 srcSpanEndLoc l    = L (srcSpanEndLine l, srcSpanEndCol l)
 
+locsSrcSpan :: Loc -> Loc -> RealSrcSpan
+locsSrcSpan start end = mkRealSrcSpan (locToRLoc start) (locToRLoc end)
+  where
+    locToRLoc :: Loc -> RealSrcLoc
+    locToRLoc (L (l, c)) = mkRealSrcLoc "" l c
+
+realSrcSpanToSrcSpan :: RealSrcSpan -> SrcSpan
+realSrcSpanToSrcSpan r = RealSrcSpan r strictNothing
 
 oneLine :: RealSrcSpan -> Bool
 oneLine l          = srcSpanStartLine l == srcSpanEndLine l
