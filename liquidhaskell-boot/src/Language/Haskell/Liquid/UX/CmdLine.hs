@@ -50,8 +50,6 @@ import Control.Monad
 import Control.Monad.IO.Class
 import Data.Maybe
 import Data.Functor ((<&>))
-import Data.Aeson (encode)
-import qualified Data.ByteString.Lazy.Char8 as B
 import Development.GitRev (gitCommitCount)
 import qualified Paths_liquidhaskell_boot as Meta
 import System.Directory
@@ -86,7 +84,7 @@ import qualified Liquid.GHC.API as GHC
 import           Language.Haskell.TH.Syntax.Compat (fromCode, toCode)
 
 import Text.PrettyPrint.HughesPJ           hiding (Mode, (<>))
-
+import qualified Text.JSON as JSON
 
 
 ---------------------------------------------------------------------------------
@@ -771,7 +769,7 @@ exitWithResult cfg targets out = void $ reportResult writeResultStdout cfg targe
 reportResultJson :: ACSS.AnnMap -> IO ()
 reportResultJson annm = do
   putStrLn "LIQUID"
-  B.putStrLn . encode . annErrors $ annm
+  putStrLn . JSON.encode . annErrors $ annm
 
 resultWithContext :: F.FixResult UserError -> IO (FixResult CError)
 resultWithContext (F.Unsafe s es)  = F.Unsafe s    <$> errorsWithContext es

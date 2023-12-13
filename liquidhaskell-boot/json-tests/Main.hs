@@ -4,15 +4,11 @@
 
 module Main (main) where
 
-import Control.Monad (void)
-import qualified Data.Aeson as Aeson
 import qualified Data.ByteString as BS
-import qualified Data.ByteString.Lazy as BSL
-import Data.Foldable (sequenceA_)
 import qualified Data.HashMap.Strict as M
 import Data.String (IsString (fromString))
 import qualified Gens
-import Hedgehog (Property, (===))
+import Hedgehog ((===))
 import qualified Hedgehog as H
 import Language.Fixpoint.Solver.Stats
   ( Stats (Stats, numBrkt, numChck, numCstr, numIter, numVald),
@@ -38,7 +34,7 @@ import Language.Haskell.Liquid.Types.Types
         o_types,
         o_vars
       ),
-    TError (ErrFail, ErrSaved, msg),
+    TError (ErrSaved),
   )
 import Language.Haskell.Liquid.UX.ACSS
   ( AnnMap
@@ -63,7 +59,6 @@ import Test.Tasty.Golden (DeleteOutputFile (OnPass), goldenVsFile)
 import Test.Tasty.HUnit ((@=?))
 import qualified Test.Tasty.Hedgehog as TH
 import Text.JSON (Result (Ok))
-import qualified Text.JSON as JSON
 import Text.PrettyPrint.HughesPJ (Doc)
 
 main :: IO ()
@@ -80,13 +75,9 @@ specs :: TestTree
 specs =
   testGroup
     "Specs"
-    [ testErrorSavedEncodeAeson,
-      testErrorSavedEncode,
-      testSourcePosEncodeAeson,
+    [ testErrorSavedEncode,
       testSourcePosEncode,
-      testOutputDocEncodeAeson,
       testOutputDocEncode,
-      testAnnMapEncodeAeson,
       testAnnMapEncode
     ]
 
@@ -99,16 +90,6 @@ properties =
       testAnnMapRoundtrip
     ]
 
-testErrorSavedEncodeAeson :: TestTree
-testErrorSavedEncodeAeson = goldenVsFile "Aeson TError Saved encode" gpath apath $ do
-  let encoded = Aeson.encode terror
-  BS.writeFile apath (BSL.toStrict encoded)
-  where
-    (gpath, apath) = getGoldenPaths "terror-saved"
-
-    terror :: TError ()
-    terror = ErrSaved (toSrcSpan (0, 3) (1, 4)) "a name" "message"
-
 testErrorSavedEncode :: TestTree
 testErrorSavedEncode = goldenVsFile "JSON TError Saved encode" gpath apath $ do
   let encoded = LiquidJSON.encode terror
@@ -118,16 +99,6 @@ testErrorSavedEncode = goldenVsFile "JSON TError Saved encode" gpath apath $ do
 
     terror :: TError ()
     terror = ErrSaved (toSrcSpan (0, 3) (1, 4)) "a name" "message"
-
-testSourcePosEncodeAeson :: TestTree
-testSourcePosEncodeAeson = goldenVsFile "Aeson SourcePos encode" gpath apath $ do
-  let encoded = Aeson.encode sourcePos
-  BS.writeFile apath (BSL.toStrict encoded)
-  where
-    (gpath, apath) = getGoldenPaths "source-pos"
-
-    sourcePos :: SourcePos
-    sourcePos = SourcePos "file" (mkPos 4) (mkPos 3)
 
 testSourcePosEncode :: TestTree
 testSourcePosEncode = goldenVsFile "JSON SourcePos encode" gpath apath $ do
@@ -140,26 +111,12 @@ testSourcePosEncode = goldenVsFile "JSON SourcePos encode" gpath apath $ do
     sourcePos :: SourcePos
     sourcePos = SourcePos "file" (mkPos 4) (mkPos 3)
 
-testOutputDocEncodeAeson :: TestTree
-testOutputDocEncodeAeson = goldenVsFile "Aeson Output Doc encode" gpath apath $ do
-  let encoded = Aeson.encode outputDoc
-  BS.writeFile apath (BSL.toStrict encoded)
-  where
-    (gpath, apath) = getGoldenPaths "output-doc"
-
 testOutputDocEncode :: TestTree
 testOutputDocEncode = goldenVsFile "JSON Output Doc encode" gpath apath $ do
   let encoded = LiquidJSON.encode outputDoc
   BS.writeFile apath encoded
   where
     (gpath, apath) = getGoldenPaths "output-doc"
-
-testAnnMapEncodeAeson :: TestTree
-testAnnMapEncodeAeson = goldenVsFile "Aeson AnnMap encode" gpath apath $ do
-  let encoded = Aeson.encode annMap
-  BS.writeFile apath (BSL.toStrict encoded)
-  where
-    (gpath, apath) = getGoldenPaths "ann-map"
 
 testAnnMapEncode :: TestTree
 testAnnMapEncode = goldenVsFile "JSON AnnMap encode" gpath apath $ do
@@ -175,8 +132,6 @@ testSourcePosRoundtrip = TH.testPropertyNamed "decode . encode SourcePos" "testS
     let encoded = LiquidJSON.encode srcPos
         result = LiquidJSON.decode encoded
 
-    aesonJsonHedgehog srcPos
-
     H.annotateShow encoded
 
     Ok srcPos === result
@@ -188,8 +143,6 @@ testOutputDocRoundtrip = TH.testPropertyNamed desc "testOutputDocRoundtrip" $
     let encoded = LiquidJSON.encode doc
         expected = fixOutputDeserializeFields doc
         result = fixOutputDeserializeFields <$> LiquidJSON.decode encoded
-
-    aesonJsonHedgehog doc
 
     H.annotateShow encoded
 
@@ -204,8 +157,6 @@ testAnnMapRoundtrip = TH.testPropertyNamed desc "testAnnMapRoundtrip" $
     let encoded = LiquidJSON.encode amap
         expected = fixAnnMapDeserializeFields amap
         result = fixAnnMapDeserializeFields <$> LiquidJSON.decode encoded
-
-    aesonJsonHedgehog amap
 
     H.annotateShow encoded
 
@@ -316,14 +267,6 @@ fixAnnMapDeserializeFields (Ann {types, errors, status, sptypes}) =
   where
     mapError :: (Loc, Loc, String) -> (Loc, Loc, String)
     mapError (x, y, s) = (x, y, dropErrorLoc s)
-
-aesonJsonHedgehog :: (JSON.JSON a, Aeson.ToJSON a) => a -> H.PropertyT IO ()
-aesonJsonHedgehog = sequenceA_ . LiquidJSON.aesonJsonEq (===) hpass hfail
-  where
-    hpass = (pure ())
-    hfail s = do
-      H.annotate s
-      H.failure
 
 getGoldenPaths :: FilePath -> (FilePath, FilePath)
 getGoldenPaths fileName = (golden, actual)

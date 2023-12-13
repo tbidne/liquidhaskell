@@ -10,7 +10,7 @@
 {-# LANGUAGE TypeApplications    #-}
 
 {-# OPTIONS_GHC -Wno-incomplete-patterns #-} -- TODO(#1918): Only needed for GHC <9.0.1.
-{-# OPTIONS_GHC -Wno-orphans #-} -- PPrint and aeson instances.
+{-# OPTIONS_GHC -Wno-orphans #-} -- PPrint JSON instances.
 
 -- | This module contains the *types* related creating Errors.
 --   It depends only on Fixpoint and basic haskell libraries,
@@ -66,7 +66,6 @@ import           Data.Typeable                (Typeable)
 import           Data.Generics                (Data)
 import qualified Data.Binary                  as B
 import qualified Data.Maybe                   as Mb
-import           Data.Aeson                   hiding (Result)
 import           Data.Hashable
 import qualified Data.HashMap.Strict          as M
 import qualified Data.List                    as L
@@ -96,6 +95,7 @@ import           Liquid.GHC.API as Ghc hiding ( Expr
                                                                , hcat
                                                                )
 import           Language.Fixpoint.Types      (pprint, showpp, Tidy (..), PPrint (..), Symbol, Expr, SubcId)
+import           Language.Fixpoint.Utils.JSON ((.=), (.:))
 import qualified Language.Fixpoint.Utils.JSON as LiquidJSON
 import qualified Language.Fixpoint.Misc       as Misc
 import qualified Language.Haskell.Liquid.Misc     as Misc
@@ -688,16 +688,6 @@ ppPropInContext td p c
                 ]
       ]
 
-instance ToJSON RealSrcSpan where
-  toJSON sp = object [ "filename"  .= f
-                     , "startLine" .= l1
-                     , "startCol"  .= c1
-                     , "endLine"   .= l2
-                     , "endCol"    .= c2
-                     ]
-    where
-      (f, l1, c1, l2, c2) = unpackRealSrcSpan sp
-
 unpackRealSrcSpan :: RealSrcSpan -> (String, Int, Int, Int, Int)
 unpackRealSrcSpan rsp = (f, l1, c1, l2, c2)
   where
@@ -707,35 +697,24 @@ unpackRealSrcSpan rsp = (f, l1, c1, l2, c2)
     l2                = srcSpanEndLine   rsp
     c2                = srcSpanEndCol    rsp
 
-
-instance FromJSON RealSrcSpan where
-  parseJSON (Object v) =
-    packRealSrcSpan
-      <$> v .: "filename"
-      <*> v .: "startLine"
-      <*> v .: "startCol"
-      <*> v .: "endLine"
-      <*> v .: "endCol"
-  parseJSON _          = mempty
-
 instance JSON RealSrcSpan where
   showJSON sp = JSON.makeObj
-    [ "endCol"    LiquidJSON..= c2
-    , "endLine"   LiquidJSON..= l2
-    , "filename"  LiquidJSON..= f
-    , "startCol"  LiquidJSON..= c1
-    , "startLine" LiquidJSON..= l1
+    [ "endCol"    .= c2
+    , "endLine"   .= l2
+    , "filename"  .= f
+    , "startCol"  .= c1
+    , "startLine" .= l1
     ]
     where
       (f, l1, c1, l2, c2) = unpackRealSrcSpan sp
 
   readJSON = LiquidJSON.readJSONObj $ \v ->
     packRealSrcSpan
-      <$> v LiquidJSON..: "filename"
-      <*> v LiquidJSON..: "startLine"
-      <*> v LiquidJSON..: "startCol"
-      <*> v LiquidJSON..: "endLine"
-      <*> v LiquidJSON..: "endCol"
+      <$> v .: "filename"
+      <*> v .: "startLine"
+      <*> v .: "startCol"
+      <*> v .: "endLine"
+      <*> v .: "endCol"
 
 packRealSrcSpan :: FilePath -> Int -> Int -> Int -> Int -> RealSrcSpan
 packRealSrcSpan f l1 c1 l2 c2 = mkRealSrcSpan loc1 loc2
@@ -747,55 +726,29 @@ srcSpanFileMb :: SrcSpan -> Maybe FilePath
 srcSpanFileMb (RealSrcSpan s _) = Just $ unpackFS $ srcSpanFile s
 srcSpanFileMb _                 = Nothing
 
-
-instance ToJSON SrcSpan where
-  toJSON (RealSrcSpan rsp _) = object [ "realSpan" .= True, "spanInfo" .= rsp ]
-  toJSON (UnhelpfulSpan _)   = object [ "realSpan" .= False ]
-
-instance FromJSON SrcSpan where
-  parseJSON (Object v) = do tag <- v .: "realSpan"
-                            if tag
-                              then RealSrcSpan <$> v .: "spanInfo" <*> pure strictNothing
-                              else return noSrcSpan
-  parseJSON _          = mempty
-
--- Default definition use ToJSON and FromJSON
-instance ToJSONKey SrcSpan
-instance FromJSONKey SrcSpan
-
 instance JSON SrcSpan where
   showJSON (RealSrcSpan rsp _) =
     JSON.makeObj
-      [ "realSpan" LiquidJSON..= True
-      , "spanInfo" LiquidJSON..= rsp
+      [ "realSpan" .= True
+      , "spanInfo" .= rsp
       ]
-  showJSON (UnhelpfulSpan _)   = JSON.makeObj [ "realSpan" LiquidJSON..= False ]
+  showJSON (UnhelpfulSpan _)   = JSON.makeObj [ "realSpan" .= False ]
 
   readJSON = LiquidJSON.readJSONObj $ \v -> do
-    tag <- v LiquidJSON..: "realSpan"
+    tag <- v .: "realSpan"
     if tag
-      then RealSrcSpan <$> v LiquidJSON..: "spanInfo" <*> pure strictNothing
+      then RealSrcSpan <$> v .: "spanInfo" <*> pure strictNothing
       else return noSrcSpan
 
-instance (PPrint a, Show a) => ToJSON (TError a) where
-  toJSON e = object [ "pos" .= pos e
-                    , "msg" .= renderTError e
-                    ]
-
-instance FromJSON (TError a) where
-  parseJSON (Object v) = errSaved <$> v .: "pos"
-                                  <*> v .: "msg"
-  parseJSON _          = mempty
-
 instance (PPrint a, Show a) => JSON (TError a) where
-  showJSON e = JSON.makeObj [ "msg" LiquidJSON..= renderTError e
-                            , "pos" LiquidJSON..= pos e
+  showJSON e = JSON.makeObj [ "msg" .= renderTError e
+                            , "pos" .= pos e
                             ]
 
   readJSON = LiquidJSON.readJSONObj $ \v ->
     errSaved
-      <$> v LiquidJSON..: "pos"
-      <*> v LiquidJSON..: "msg"
+      <$> v .: "pos"
+      <*> v .: "msg"
 
 -- | Renders a 'TError' to a 'String'. Used in serialization.
 renderTError :: (PPrint a, Show a) => TError a -> String

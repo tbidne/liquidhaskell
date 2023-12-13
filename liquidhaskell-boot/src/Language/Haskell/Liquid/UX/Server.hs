@@ -7,11 +7,11 @@ import           Language.Haskell.Liquid.Types (Output(..))
 import qualified Language.Haskell.Liquid.UX.ACSS as A
 import           Text.PrettyPrint.HughesPJ    hiding (Mode)
 import           Language.Fixpoint.Utils.Files
+import qualified Language.Fixpoint.Utils.JSON as LiquidJSON
 import           System.Directory
 import           Data.Time.Clock (UTCTime)
 import qualified Control.Exception as Ex
-import           Data.Aeson
-import qualified Data.ByteString.Lazy   as B
+import qualified Data.ByteString   as BS
 
 -- data Time = TimeTodo deriving (Eq, Ord, Show)
 
@@ -53,6 +53,6 @@ getTypeInfo _ _ Nothing     = "ERROR: corrupt annotation info"
 getTypeInfo l c (Just info) = error "TODO: getTypeInfo"
 
 getAnnMap :: FilePath -> IO (Maybe A.AnnMap)
-getAnnMap srcF = decode <$> B.readFile jsonF
+getAnnMap srcF = LiquidJSON.decodeMaybe <$> BS.readFile jsonF
   where
     jsonF      = extFileName Json srcF

@@ -125,7 +125,6 @@ library
 
   build-depends:      base                 >= 4.11.1.0 && < 5
                     , Diff                 >= 0.3 && < 0.5
-                    , aeson
                     , binary
                     , bytestring           >= 0.10
                     , Cabal                < 3.11
@@ -214,8 +213,7 @@ test-suite json-tests
   main-is:          Main.hs
   other-modules:    Gens
   hs-source-dirs:   json-tests
-  build-depends:    aeson
-                  , base
+  build-depends:    base
                   , bytestring
                   , containers
                   , filepath

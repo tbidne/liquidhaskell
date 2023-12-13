@@ -41,7 +41,6 @@ import           Data.Maybe                                   (mapMaybe)
 import           Data.Typeable                                (Proxy (Proxy), Typeable)
 import qualified Data.Typeable                                as Typeable
 
-import           Data.Aeson
 import           Control.Arrow                                hiding ((<+>))
 -- import           Control.Applicative      ((<$>))
 import           Control.Monad                                (when, forM_)
@@ -51,8 +50,7 @@ import           System.FilePath                              (takeFileName, dro
 import           System.Directory                             (findExecutable)
 import qualified System.Directory                             as Dir
 import qualified Data.List                                    as L
-import qualified Data.Vector                                  as V
-import qualified Data.ByteString.Lazy                         as B
+import qualified Data.ByteString                              as BS
 import qualified Data.Text                                    as T
 import qualified Data.HashMap.Strict                          as M
 import           Text.JSON                                    ( JSON (readJSON, showJSON)
@@ -66,6 +64,7 @@ import           Language.Fixpoint.Misc
 import           Language.Haskell.Liquid.GHC.Misc
 import qualified Liquid.GHC.API              as SrcLoc
 import           Language.Fixpoint.Types                      hiding (panic, Error, Loc, Constant (..), Located (..))
+import           Language.Fixpoint.Utils.JSON ((.=), (.:))
 import qualified Language.Fixpoint.Utils.JSON as LiquidJSON
 import           Language.Haskell.Liquid.Misc
 import           Language.Haskell.Liquid.Types.PrettyPrint
@@ -118,7 +117,7 @@ doGenerate cfg tplAnnMap typAnnMap annTyp srcF
   = do generateHtml pandocF srcF tpHtmlF tplAnnMap
        generateHtml pandocF srcF tyHtmlF typAnnMap
        writeFile         vimF  $ vimAnnot cfg annTyp
-       B.writeFile       jsonF $ encode typAnnMap
+       BS.writeFile      jsonF $ LiquidJSON.encode typAnnMap
     where
        pandocF    = pandocHtml cfg
        tyHtmlF    = extFileName Html                   srcF
@@ -417,12 +416,6 @@ vimBind (sp, (v, ann)) = printf "%d:%d-%d:%d::%s" l1 c1 l2 c2 (v ++ " :: " ++ sh
 -- | JSON Instances ----------------------------------------------------
 ------------------------------------------------------------------------
 
-instance ToJSON ACSS.Status where
-  toJSON ACSS.Safe   = "safe"
-  toJSON ACSS.Unsafe = "unsafe"
-  toJSON ACSS.Error  = "error"
-  toJSON ACSS.Crash  = "crash"
-
 instance JSON ACSS.Status where
   showJSON ACSS.Safe   = "safe"
   showJSON ACSS.Unsafe = "unsafe"
@@ -437,69 +430,50 @@ instance JSON ACSS.Status where
     other -> JSON.Error $ "Expected one of (safe | unsafe | error | crash), received: " ++ show other
   readJSON other = JSON.Error $ "Expected string, received: " ++ show other
 
-instance ToJSON Annot1 where
-  toJSON (A1 i a r c) = object [ "ident" .= i
-                               , "ann"   .= a
-                               , "row"   .= r
-                               , "col"   .= c
-                               ]
-
 instance JSON Annot1 where
   showJSON (A1 i a r c) =
-    JSON.makeObj [ "ann"   LiquidJSON..= a
-                 , "col"   LiquidJSON..= c
-                 , "ident" LiquidJSON..= i
-                 , "row"   LiquidJSON..= r
+    JSON.makeObj [ "ann"   .= a
+                 , "col"   .= c
+                 , "ident" .= i
+                 , "row"   .= r
                  ]
 
   readJSON = LiquidJSON.readJSONObj $ \v ->
     A1
-      <$> v LiquidJSON..: "ident"
-      <*> v LiquidJSON..: "ann"
-      <*> v LiquidJSON..: "row"
-      <*> v LiquidJSON..: "col"
-
-instance ToJSON Loc where
-  toJSON (L (l, c)) = object [ "line"     .= toJSON l
-                             , "column"   .= toJSON c ]
+      <$> v .: "ident"
+      <*> v .: "ann"
+      <*> v .: "row"
+      <*> v .: "col"
 
 instance JSON Loc where
   showJSON (L (l, c)) =
-    JSON.makeObj [ "column"   LiquidJSON..= c
-                 , "line"     LiquidJSON..= l
+    JSON.makeObj [ "column"   .= c
+                 , "line"     .= l
                  ]
 
   readJSON = LiquidJSON.readJSONObj $ \v ->
     L <$>
       ( (,)
-          <$> v LiquidJSON..: "line"
-          <*> v LiquidJSON..: "column"
+          <$> v .: "line"
+          <*> v .: "column"
       )
-
-instance ToJSON AnnErrors where
-  toJSON (AnnErrors errors) = Array $ V.fromList (toJ <$> errors)
-    where
-      toJ (l,l',s)        = object [ "start"   .= toJSON l
-                                   , "stop"    .= toJSON l'
-                                   , "message" .= toJSON (dropErrorLoc s)
-                                   ]
 
 instance JSON AnnErrors where
   showJSON (AnnErrors errors) = JSArray (toJ <$> errors)
     where
       toJ (l,l',s) =
-        JSON.makeObj [ "message" LiquidJSON..= dropErrorLoc s
-                     , "start"   LiquidJSON..= l
-                     , "stop"    LiquidJSON..= l'
+        JSON.makeObj [ "message" .= dropErrorLoc s
+                     , "start"   .= l
+                     , "stop"    .= l'
                      ]
 
   readJSON (JSArray arr) = AnnErrors <$> traverse fromJ arr
     where
       fromJ = LiquidJSON.readJSONObj $ \v ->
         (,,)
-          <$> v LiquidJSON..: "start"
-          <*> v LiquidJSON..: "stop"
-          <*> v LiquidJSON..: "message"
+          <$> v .: "start"
+          <*> v .: "stop"
+          <*> v .: "message"
   readJSON other = JSON.Error $ "Expected array, received: " ++ show other
 
 dropErrorLoc :: String -> String
@@ -509,15 +483,10 @@ dropErrorLoc msg
   where
     (_, msg') = break (' ' ==) msg
 
-instance (Show k, ToJSON a) => ToJSON (Assoc k a) where
-  toJSON (Asc kas) = object [ tshow' k .= toJSON a | (k, a) <- M.toList kas ]
-    where
-      tshow'       = fromString . show
-
 -- Typeable constraint for better error message. Can be removed if it is
 -- cumbersome, especially since readJSON is not currently in-use.
 instance (Hashable k, JSON a, Read k, Show k, Typeable k) => JSON (Assoc k a) where
-  showJSON (Asc kas) = JSON.makeObj [ tshow' k LiquidJSON..= a | (k, a) <- M.toList kas ]
+  showJSON (Asc kas) = JSON.makeObj [ tshow' k .= a | (k, a) <- M.toList kas ]
     where
       tshow'       = fromString . show
 
@@ -553,50 +522,37 @@ newtype SpanTypeJSON =
 instance JSON SpanTypeJSON where
   showJSON (MkSpanTypeJSON (sp, (ident, ann))) =
     JSON.makeObj
-      [ "ann"   LiquidJSON..= ann
-      , "ident" LiquidJSON..= ident
-      , "start" LiquidJSON..= start
-      , "stop"  LiquidJSON..= stop
+      [ "ann"   .= ann
+      , "ident" .= ident
+      , "start" .= start
+      , "stop"  .= stop
       ]
     where
       start = srcSpanStartLoc sp
       stop = srcSpanEndLoc sp
 
   readJSON = LiquidJSON.readJSONObj $ \v -> do
-    start <- v LiquidJSON..: "start"
-    stop <- v LiquidJSON..: "stop"
-    ident <- v LiquidJSON..: "ident"
-    ann <- v LiquidJSON..: "ann"
+    start <- v .: "start"
+    stop <- v .: "stop"
+    ident <- v .: "ident"
+    ann <- v .: "ann"
 
     pure $ MkSpanTypeJSON (locsSrcSpan start stop, (ident, ann))
 
 instance JSON ACSS.AnnMap where
   showJSON a = JSON.makeObj
-    [ "errors"  LiquidJSON..= annErrors    a
-    , "sptypes" LiquidJSON..= (MkSpanTypeJSON <$> ACSS.sptypes a)
-    , "status"  LiquidJSON..= ACSS.status  a
-    , "types"   LiquidJSON..= annTypes     a
+    [ "errors"  .= annErrors    a
+    , "sptypes" .= (MkSpanTypeJSON <$> ACSS.sptypes a)
+    , "status"  .= ACSS.status  a
+    , "types"   .= annTypes     a
     ]
 
   readJSON = LiquidJSON.readJSONObj $ \v ->
     ACSS.Ann
-      <$> (unAnnTypes <$> v LiquidJSON..: "types")
-      <*> (unAnnErrors <$> v LiquidJSON..: "errors")
-      <*> v LiquidJSON..: "status"
-      <*> (fmap unMkSpanTypeJSON <$> v LiquidJSON..: "sptypes")
-
-instance ToJSON ACSS.AnnMap where
-  toJSON a = object [ "types"   .= toJSON (annTypes     a)
-                    , "errors"  .= toJSON (annErrors    a)
-                    , "status"  .= toJSON (ACSS.status  a)
-                    , "sptypes" .= (toJ <$> ACSS.sptypes a)
-                    ]
-    where
-      toJ (sp, (x,t)) = object [ "start" .= toJSON (srcSpanStartLoc sp)
-                               , "stop"  .= toJSON (srcSpanEndLoc   sp)
-                               , "ident" .= toJSON x
-                               , "ann"  .= toJSON t
-                               ]
+      <$> (unAnnTypes <$> v .: "types")
+      <*> (unAnnErrors <$> v .: "errors")
+      <*> v .: "status"
+      <*> (fmap unMkSpanTypeJSON <$> v .: "sptypes")
 
 annErrors :: ACSS.AnnMap -> AnnErrors
 annErrors = AnnErrors . ACSS.errors

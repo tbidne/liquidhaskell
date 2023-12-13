@@ -42,7 +42,6 @@ module Language.Haskell.Liquid.UX.DiffCheck (
 
 
 import           Prelude                                hiding (error)
-import           Data.Aeson
 import Data.Text                                        (Text)
 import qualified Data.Text                              as T
 import           Data.Algorithm.Diff
@@ -53,6 +52,7 @@ import qualified Data.HashMap.Strict                    as M
 import qualified Data.List                              as L
 import           System.Directory                       (copyFile, doesFileExist)
 import           Language.Fixpoint.Types                (atLoc, FixResult (..), SourcePos(..), safeSourcePos, unPos)
+import           Language.Fixpoint.Utils.JSON ((.=), (.:))
 import qualified Language.Fixpoint.Utils.JSON as LiquidJSON
 -- import qualified Language.Fixpoint.Misc                 as Misc
 import           Language.Fixpoint.Utils.Files
@@ -63,7 +63,6 @@ import           Liquid.GHC.API        as Ghc hiding
   (Located, line, sourceName, text, panic, showPpr)
 import           Text.PrettyPrint.HughesPJ              (text, render, Doc)
 import qualified Data.ByteString                        as B
-import qualified Data.ByteString.Lazy                   as LB
 
 import           Language.Haskell.Liquid.Types          hiding (Def, LMap)
 import           Language.Haskell.Liquid.UX.Annotate    ()
@@ -486,7 +485,7 @@ saveResult :: FilePath -> Output Doc -> IO ()
 --------------------------------------------------------------------------------
 saveResult target res = do
   copyFile target saveF
-  B.writeFile errF $ LB.toStrict $ encode res
+  B.writeFile errF $ LiquidJSON.encode res
   where
     saveF = extFileName Saved  target
     errF  = extFileName Cache  target
@@ -500,7 +499,7 @@ loadResult f = do
     then convert <$> B.readFile jsonF
     else return mempty
   where
-    convert  = fromMaybe mempty . decode . LB.fromStrict
+    convert  = fromMaybe mempty . LiquidJSON.decodeMaybe
     jsonF    = extFileName Cache f
 
 --------------------------------------------------------------------------------
@@ -574,31 +573,15 @@ checkedItv chDefs = foldr (`IM.insert` ()) IM.empty is
 
 
 --------------------------------------------------------------------------------
--- | Aeson instances -----------------------------------------------------------
+-- | JSON instances ------------------------------------------------------------
 --------------------------------------------------------------------------------
-
-instance ToJSON SourcePos where
-  toJSON p = object [   "sourceName"   .= f
-                      , "sourceLine"   .= unPos l
-                      , "sourceColumn" .= unPos c
-                      ]
-             where
-               f    = sourceName   p
-               l    = sourceLine   p
-               c    = sourceColumn p
-
-instance FromJSON SourcePos where
-  parseJSON (Object v) = safeSourcePos <$> v .: "sourceName"
-                                <*> v .: "sourceLine"
-                                <*> v .: "sourceColumn"
-  parseJSON _          = mempty
 
 instance JSON SourcePos where
   showJSON p =
     JSON.makeObj
-      [ "sourceColumn"   LiquidJSON..= unPos c
-      , "sourceLine"   LiquidJSON..= unPos l
-      , "sourceName" LiquidJSON..= f
+      [ "sourceColumn" .= unPos c
+      , "sourceLine"   .= unPos l
+      , "sourceName"   .= f
       ]
     where
       f    = sourceName   p
@@ -610,29 +593,15 @@ instance JSON SourcePos where
   -- what happens here.
   readJSON = LiquidJSON.readJSONObj $ \v ->
     safeSourcePos
-      <$> v LiquidJSON..: "sourceName"
-      <*> v LiquidJSON..: "sourceLine"
-      <*> v LiquidJSON..: "sourceColumn"
-
-instance FromJSON ErrorResult
-
-instance ToJSON Doc where
-  toJSON = String . T.pack . render
-
-instance FromJSON Doc where
-  parseJSON (String s) = return $ text $ T.unpack s
-  parseJSON _          = mempty
+      <$> v .: "sourceName"
+      <*> v .: "sourceLine"
+      <*> v .: "sourceColumn"
 
 instance JSON Doc where
   showJSON = JSString . JSON.toJSString . render
 
   readJSON (JSString str) = pure $ text $ JSON.fromJSString str
   readJSON bad = fail $ "Doc: Expected a string, received: " <> show bad
-
-instance ToJSON a => ToJSON (AnnInfo a) where
-  toJSON = genericToJSON defaultOptions
-  toEncoding = genericToEncoding defaultOptions
-instance FromJSON a => FromJSON (AnnInfo a)
 
 newtype AnnInfoValueJSON a =
   MkAnnInfoValueJSON { unMkAnnInfoValueJSON :: (Maybe Text, a) }
@@ -670,29 +639,23 @@ instance forall a. JSON a => JSON (AnnInfo a) where
 
   readJSON bad = fail $ "AnnInfo: Expected array, received: " ++ show bad
 
-instance ToJSON (Output Doc) where
-  toJSON = genericToJSON defaultOptions
-  toEncoding = genericToEncoding defaultOptions
-instance FromJSON (Output Doc) where
-  parseJSON = genericParseJSON defaultOptions
-
 instance JSON (Output Doc) where
   showJSON (O var types templs bots result) =
     JSON.makeObj
-      [ "o_vars" LiquidJSON..= LiquidJSON.encodeMaybeToNull var,
-        "o_types" LiquidJSON..= types,
-        "o_templs" LiquidJSON..= templs,
-        "o_bots" LiquidJSON..= bots,
-        "o_result" LiquidJSON..= result
+      [ "o_vars"   .= LiquidJSON.encodeMaybeToNull var,
+        "o_types"  .= types,
+        "o_templs" .= templs,
+        "o_bots"   .= bots,
+        "o_result" .= result
       ]
 
   readJSON = LiquidJSON.readJSONObj $ \v -> do
     O
       <$> parseVars v
-      <*> v LiquidJSON..: "o_types"
-      <*> v LiquidJSON..: "o_templs"
-      <*> v LiquidJSON..: "o_bots"
-      <*> v LiquidJSON..: "o_result"
+      <*> v .: "o_types"
+      <*> v .: "o_templs"
+      <*> v .: "o_bots"
+      <*> v .: "o_result"
       where
         parseVars :: JSON.JSObject JSON.JSValue -> JSON.Result (Maybe [String])
         parseVars v = do
