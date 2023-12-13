@@ -2,6 +2,8 @@
 {-# LANGUAGE NoMonomorphismRestriction  #-}
 {-# LANGUAGE OverloadedStrings          #-}
 {-# LANGUAGE FlexibleInstances          #-}
+{-# LANGUAGE ScopedTypeVariables        #-}
+{-# LANGUAGE TupleSections              #-}
 
 {-# OPTIONS_GHC -Wno-orphans #-}
 
@@ -17,6 +19,7 @@ module Language.Haskell.Liquid.UX.Annotate
   , annotate
   , tokeniseWithLoc
   , annErrors
+  , dropErrorLoc
   ) where
 
 import           Data.Hashable
@@ -35,6 +38,8 @@ import           Data.Char                                    (isSpace)
 import           Data.Function                                (on)
 import           Data.List                                    (sortBy)
 import           Data.Maybe                                   (mapMaybe)
+import           Data.Typeable                                (Proxy (Proxy), Typeable)
+import qualified Data.Typeable                                as Typeable
 
 import           Data.Aeson
 import           Control.Arrow                                hiding ((<+>))
@@ -50,6 +55,9 @@ import qualified Data.Vector                                  as V
 import qualified Data.ByteString.Lazy                         as B
 import qualified Data.Text                                    as T
 import qualified Data.HashMap.Strict                          as M
+import           Text.JSON                                    ( JSON (readJSON, showJSON)
+                                                              , JSValue (JSString, JSArray))
+import qualified Text.JSON                                    as JSON
 import qualified Language.Haskell.Liquid.Misc                 as Misc
 import qualified Language.Haskell.Liquid.UX.ACSS              as ACSS
 import           Language.Haskell.HsColour.Classify
@@ -58,6 +66,7 @@ import           Language.Fixpoint.Misc
 import           Language.Haskell.Liquid.GHC.Misc
 import qualified Liquid.GHC.API              as SrcLoc
 import           Language.Fixpoint.Types                      hiding (panic, Error, Loc, Constant (..), Located (..))
+import qualified Language.Fixpoint.Utils.JSON as LiquidJSON
 import           Language.Haskell.Liquid.Misc
 import           Language.Haskell.Liquid.Types.PrettyPrint
 import           Language.Haskell.Liquid.Types.RefType
@@ -65,7 +74,7 @@ import           Language.Haskell.Liquid.Types.RefType
 import           Language.Haskell.Liquid.UX.Tidy
 import           Language.Haskell.Liquid.Types                hiding (Located(..), Def(..))
 -- import           Language.Haskell.Liquid.Types.Specifications
-
+import qualified Text.Read as TR
 
 -- | @output@ creates the pretty printed output
 --------------------------------------------------------------------------------------------
@@ -414,6 +423,20 @@ instance ToJSON ACSS.Status where
   toJSON ACSS.Error  = "error"
   toJSON ACSS.Crash  = "crash"
 
+instance JSON ACSS.Status where
+  showJSON ACSS.Safe   = "safe"
+  showJSON ACSS.Unsafe = "unsafe"
+  showJSON ACSS.Error  = "error"
+  showJSON ACSS.Crash  = "crash"
+
+  readJSON (JSString s) = case s of
+    "safe" -> JSON.Ok ACSS.Safe
+    "unsafe" -> JSON.Ok ACSS.Unsafe
+    "error" -> JSON.Ok ACSS.Error
+    "crash" -> JSON.Ok ACSS.Crash
+    other -> JSON.Error $ "Expected one of (safe | unsafe | error | crash), received: " ++ show other
+  readJSON other = JSON.Error $ "Expected string, received: " ++ show other
+
 instance ToJSON Annot1 where
   toJSON (A1 i a r c) = object [ "ident" .= i
                                , "ann"   .= a
@@ -421,9 +444,37 @@ instance ToJSON Annot1 where
                                , "col"   .= c
                                ]
 
+instance JSON Annot1 where
+  showJSON (A1 i a r c) =
+    JSON.makeObj [ "ann"   LiquidJSON..= a
+                 , "col"   LiquidJSON..= c
+                 , "ident" LiquidJSON..= i
+                 , "row"   LiquidJSON..= r
+                 ]
+
+  readJSON = LiquidJSON.readJSONObj $ \v ->
+    A1
+      <$> v LiquidJSON..: "ident"
+      <*> v LiquidJSON..: "ann"
+      <*> v LiquidJSON..: "row"
+      <*> v LiquidJSON..: "col"
+
 instance ToJSON Loc where
   toJSON (L (l, c)) = object [ "line"     .= toJSON l
                              , "column"   .= toJSON c ]
+
+instance JSON Loc where
+  showJSON (L (l, c)) =
+    JSON.makeObj [ "column"   LiquidJSON..= c
+                 , "line"     LiquidJSON..= l
+                 ]
+
+  readJSON = LiquidJSON.readJSONObj $ \v ->
+    L <$>
+      ( (,)
+          <$> v LiquidJSON..: "line"
+          <*> v LiquidJSON..: "column"
+      )
 
 instance ToJSON AnnErrors where
   toJSON (AnnErrors errors) = Array $ V.fromList (toJ <$> errors)
@@ -433,8 +484,23 @@ instance ToJSON AnnErrors where
                                    , "message" .= toJSON (dropErrorLoc s)
                                    ]
 
+instance JSON AnnErrors where
+  showJSON (AnnErrors errors) = JSArray (toJ <$> errors)
+    where
+      toJ (l,l',s) =
+        JSON.makeObj [ "message" LiquidJSON..= dropErrorLoc s
+                     , "start"   LiquidJSON..= l
+                     , "stop"    LiquidJSON..= l'
+                     ]
 
-
+  readJSON (JSArray arr) = AnnErrors <$> traverse fromJ arr
+    where
+      fromJ = LiquidJSON.readJSONObj $ \v ->
+        (,,)
+          <$> v LiquidJSON..: "start"
+          <*> v LiquidJSON..: "stop"
+          <*> v LiquidJSON..: "message"
+  readJSON other = JSON.Error $ "Expected array, received: " ++ show other
 
 dropErrorLoc :: String -> String
 dropErrorLoc msg
@@ -447,6 +513,77 @@ instance (Show k, ToJSON a) => ToJSON (Assoc k a) where
   toJSON (Asc kas) = object [ tshow' k .= toJSON a | (k, a) <- M.toList kas ]
     where
       tshow'       = fromString . show
+
+-- Typeable constraint for better error message. Can be removed if it is
+-- cumbersome, especially since readJSON is not currently in-use.
+instance (Hashable k, JSON a, Read k, Show k, Typeable k) => JSON (Assoc k a) where
+  showJSON (Asc kas) = JSON.makeObj [ tshow' k LiquidJSON..= a | (k, a) <- M.toList kas ]
+    where
+      tshow'       = fromString . show
+
+  readJSON (JSON.JSObject obj) = do
+    let assocXs :: [(String, JSValue)] = JSON.fromJSObject obj
+    assocXs' :: [(k', a)] <- traverse readKey assocXs
+    pure $ Asc . M.fromList $ assocXs'
+    where
+      readKey :: (String, JSValue) -> JSON.Result (k, a)
+      readKey (k, v) =
+        -- read key first
+        case TR.readEither k of
+          Left err ->
+            JSON.Error $
+              mconcat
+                [ "Could not read json key '",
+                  k,
+                  "' as type '",
+                  show (Typeable.typeRep (Proxy :: Proxy k)),
+                  "': ",
+                  err
+                ]
+          -- if successful, read json value
+          (Right k') -> (k',) <$> readJSON v
+  readJSON bad = fail $  "Expected object, received: " ++ show bad
+
+-- | Auxillary type on which to hang AnnMap.sptypes' JSON instance.
+-- This is really only useful for implementing the currently unused
+-- readJSON function.
+newtype SpanTypeJSON =
+  MkSpanTypeJSON { unMkSpanTypeJSON :: (SrcLoc.RealSrcSpan, (String, String)) }
+
+instance JSON SpanTypeJSON where
+  showJSON (MkSpanTypeJSON (sp, (ident, ann))) =
+    JSON.makeObj
+      [ "ann"   LiquidJSON..= ann
+      , "ident" LiquidJSON..= ident
+      , "start" LiquidJSON..= start
+      , "stop"  LiquidJSON..= stop
+      ]
+    where
+      start = srcSpanStartLoc sp
+      stop = srcSpanEndLoc sp
+
+  readJSON = LiquidJSON.readJSONObj $ \v -> do
+    start <- v LiquidJSON..: "start"
+    stop <- v LiquidJSON..: "stop"
+    ident <- v LiquidJSON..: "ident"
+    ann <- v LiquidJSON..: "ann"
+
+    pure $ MkSpanTypeJSON (locsSrcSpan start stop, (ident, ann))
+
+instance JSON ACSS.AnnMap where
+  showJSON a = JSON.makeObj
+    [ "errors"  LiquidJSON..= annErrors    a
+    , "sptypes" LiquidJSON..= (MkSpanTypeJSON <$> ACSS.sptypes a)
+    , "status"  LiquidJSON..= ACSS.status  a
+    , "types"   LiquidJSON..= annTypes     a
+    ]
+
+  readJSON = LiquidJSON.readJSONObj $ \v ->
+    ACSS.Ann
+      <$> (unAnnTypes <$> v LiquidJSON..: "types")
+      <*> (unAnnErrors <$> v LiquidJSON..: "errors")
+      <*> v LiquidJSON..: "status"
+      <*> (fmap unMkSpanTypeJSON <$> v LiquidJSON..: "sptypes")
 
 instance ToJSON ACSS.AnnMap where
   toJSON a = object [ "types"   .= toJSON (annTypes     a)
@@ -464,11 +601,19 @@ instance ToJSON ACSS.AnnMap where
 annErrors :: ACSS.AnnMap -> AnnErrors
 annErrors = AnnErrors . ACSS.errors
 
+unAnnErrors :: AnnErrors -> [(Loc, Loc, String)]
+unAnnErrors (AnnErrors errs) = errs
+
 annTypes         :: ACSS.AnnMap -> AnnTypes
 annTypes a       = grp [(l, c, ann1 l c x s) | (l, c, x, s) <- binders']
   where
+    ann1 :: Int -> Int -> String -> String -> Annot1
     ann1 l c x s = A1 x s l c
+
+    grp :: [(Int, Int, Annot1)] -> Assoc Int (Assoc Int Annot1)
     grp          = L.foldl' (\m (r,c,x) -> ins r c x m) (Asc M.empty)
+
+    binders' :: [(Int, Int, String, String)]
     binders'     = [(l, c, x, s) | (L (l, c), (x, s)) <- M.toList $ ACSS.types a]
 
 ins :: (Eq k, Eq k1, Hashable k, Hashable k1)
@@ -476,6 +621,17 @@ ins :: (Eq k, Eq k1, Hashable k, Hashable k1)
 ins r c x (Asc m)  = Asc (M.insert r (Asc (M.insert c x rm)) m)
   where
     Asc rm         = M.lookupDefault (Asc M.empty) r m
+
+-- The inverse of 'annTypes' above.
+unAnnTypes :: AnnTypes -> M.HashMap Loc (String, String)
+unAnnTypes = M.fromList . toLocList
+  where
+    toLocList :: AnnTypes -> [(Loc, (String, String))]
+    toLocList (Asc m) = M.foldlWithKey' f [] m
+      where
+        f :: [(Loc, (String, String))] -> Int -> Assoc Int Annot1 -> [(Loc, (String, String))]
+        f acc k (Asc m1) =
+          acc ++ ((\(k1, A1 x s _ _) -> (L (k, k1), (x, s))) <$> M.toList m1)
 
 tokeniseWithLoc :: String -> [(TokenType, String, Loc)]
 tokeniseWithLoc = ACSS.tokeniseWithLoc (Just tokAnnot)

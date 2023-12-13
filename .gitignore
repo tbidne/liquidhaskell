@@ -44,7 +44,6 @@ tests/synthesis/logs/*
 TAGS
 tags*
 a.out
-*.json
 js/
 css/
 

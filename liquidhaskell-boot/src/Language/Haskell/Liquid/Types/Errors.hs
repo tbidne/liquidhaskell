@@ -6,6 +6,7 @@
 {-# LANGUAGE DeriveFunctor       #-}
 {-# LANGUAGE DerivingVia         #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE StandaloneDeriving  #-}
 {-# LANGUAGE TypeApplications    #-}
 
 {-# OPTIONS_GHC -Wno-incomplete-patterns #-} -- TODO(#1918): Only needed for GHC <9.0.1.
@@ -50,6 +51,10 @@ module Language.Haskell.Liquid.Types.Errors (
   , packRealSrcSpan
   , unpackRealSrcSpan
   , srcSpanFileMb
+
+  -- * Misc
+  , errSaved
+  , renderTError
   ) where
 
 import           Prelude                      hiding (error, span)
@@ -69,6 +74,8 @@ import           Data.Void
 import           System.Directory
 import           System.FilePath
 import           Text.PrettyPrint.HughesPJ
+import           Text.JSON (JSON (readJSON, showJSON))
+import qualified Text.JSON as JSON
 import qualified Text.Megaparsec              as P
 
 import           Liquid.GHC.API as Ghc hiding ( Expr
@@ -89,6 +96,7 @@ import           Liquid.GHC.API as Ghc hiding ( Expr
                                                                , hcat
                                                                )
 import           Language.Fixpoint.Types      (pprint, showpp, Tidy (..), PPrint (..), Symbol, Expr, SubcId)
+import qualified Language.Fixpoint.Utils.JSON as LiquidJSON
 import qualified Language.Fixpoint.Misc       as Misc
 import qualified Language.Haskell.Liquid.Misc     as Misc
 import           Language.Haskell.Liquid.Misc ((<->))
@@ -486,7 +494,7 @@ data TError t =
                 , msg   :: !Doc
                 } -- ^ Sigh. Other.
 
-  deriving (Typeable, Generic , Functor )
+  deriving (Typeable, Generic , Functor)
 
 errDupSpecs :: Doc -> Misc.ListNE SrcSpan -> TError t
 errDupSpecs d spans@(sp:_) = ErrDupSpecs sp d spans
@@ -505,6 +513,8 @@ errSpan =  pos
 -- | Simple unstructured type for panic ----------------------------------------
 --------------------------------------------------------------------------------
 type UserError  = TError Doc
+
+deriving instance Show UserError
 
 instance PPrint UserError where
   pprintTidy k = ppError k empty . fmap (pprintTidy Lossy)
@@ -561,10 +571,8 @@ pprRealSrcSpan span
    pathDoc = text $ normalise $ unpackFS path
    ecol'   = if ecol == 0 then ecol else ecol - 1
 
-instance Show UserError where
-  show = showpp
-
-instance Ex.Exception UserError
+instance Ex.Exception UserError where
+  displayException = showpp
 
 -- | Construct and show an Error, then crash
 uError :: UserError -> a
@@ -710,6 +718,25 @@ instance FromJSON RealSrcSpan where
       <*> v .: "endCol"
   parseJSON _          = mempty
 
+instance JSON RealSrcSpan where
+  showJSON sp = JSON.makeObj
+    [ "endCol"    LiquidJSON..= c2
+    , "endLine"   LiquidJSON..= l2
+    , "filename"  LiquidJSON..= f
+    , "startCol"  LiquidJSON..= c1
+    , "startLine" LiquidJSON..= l1
+    ]
+    where
+      (f, l1, c1, l2, c2) = unpackRealSrcSpan sp
+
+  readJSON = LiquidJSON.readJSONObj $ \v ->
+    packRealSrcSpan
+      <$> v LiquidJSON..: "filename"
+      <*> v LiquidJSON..: "startLine"
+      <*> v LiquidJSON..: "startCol"
+      <*> v LiquidJSON..: "endLine"
+      <*> v LiquidJSON..: "endCol"
+
 packRealSrcSpan :: FilePath -> Int -> Int -> Int -> Int -> RealSrcSpan
 packRealSrcSpan f l1 c1 l2 c2 = mkRealSrcSpan loc1 loc2
   where
@@ -736,9 +763,23 @@ instance FromJSON SrcSpan where
 instance ToJSONKey SrcSpan
 instance FromJSONKey SrcSpan
 
+instance JSON SrcSpan where
+  showJSON (RealSrcSpan rsp _) =
+    JSON.makeObj
+      [ "realSpan" LiquidJSON..= True
+      , "spanInfo" LiquidJSON..= rsp
+      ]
+  showJSON (UnhelpfulSpan _)   = JSON.makeObj [ "realSpan" LiquidJSON..= False ]
+
+  readJSON = LiquidJSON.readJSONObj $ \v -> do
+    tag <- v LiquidJSON..: "realSpan"
+    if tag
+      then RealSrcSpan <$> v LiquidJSON..: "spanInfo" <*> pure strictNothing
+      else return noSrcSpan
+
 instance (PPrint a, Show a) => ToJSON (TError a) where
   toJSON e = object [ "pos" .= pos e
-                    , "msg" .= render (ppError' Full empty e)
+                    , "msg" .= renderTError e
                     ]
 
 instance FromJSON (TError a) where
@@ -746,6 +787,22 @@ instance FromJSON (TError a) where
                                   <*> v .: "msg"
   parseJSON _          = mempty
 
+instance (PPrint a, Show a) => JSON (TError a) where
+  showJSON e = JSON.makeObj [ "msg" LiquidJSON..= renderTError e
+                            , "pos" LiquidJSON..= pos e
+                            ]
+
+  readJSON = LiquidJSON.readJSONObj $ \v ->
+    errSaved
+      <$> v LiquidJSON..: "pos"
+      <*> v LiquidJSON..: "msg"
+
+-- | Renders a 'TError' to a 'String'. Used in serialization.
+renderTError :: (PPrint a, Show a) => TError a -> String
+renderTError e = render (ppError' Full empty e)
+
+-- | Creates 'ErrSaved' from the span and body. Used when deserializing
+-- 'TError'.
 errSaved :: SrcSpan -> String -> TError a
 errSaved sp body | n : m <- lines body = ErrSaved sp (text n) (text $ unlines m)
 

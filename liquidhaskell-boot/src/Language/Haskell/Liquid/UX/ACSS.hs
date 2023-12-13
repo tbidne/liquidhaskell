@@ -27,13 +27,14 @@ import Data.Char   (isSpace)
 import Text.Printf
 import Language.Haskell.Liquid.GHC.Misc
 import Language.Haskell.Liquid.Types.Errors (panic, impossible)
+import Language.Haskell.Liquid.Types.Types (PPrint (pprintTidy))
 
 data AnnMap  = Ann
   { types   :: M.HashMap Loc (String, String) -- ^ Loc -> (Var, Type)
   , errors  :: [(Loc, Loc, String)]           -- ^ List of error intervals
   , status  :: !Status
   , sptypes :: ![(SrcLoc.RealSrcSpan, (String, String)) ]-- ^ Type information with spans
-  }
+  } deriving (Eq, Show)
 
 data Status = Safe | Unsafe | Error | Crash
               deriving (Eq, Ord, Show)
@@ -238,8 +239,16 @@ parseLines mname i (x:f:l:c:n:rest)
 parseLines _ i _
   = panic Nothing $ "Error Parsing Annot Input on Line: " ++ show i
 
-instance Show AnnMap where
-  show (Ann ts es _ _) =  "\n\n"
+-- Originally, AnnMap had a Show instance based on the following logic.
+-- This however made debugging json tests difficult, as the formatting
+-- obscured the data. Deriving Show instead made debugging much easier.
+--
+-- We could have removed the old logic as it does not appear to be in-use
+-- anywhere (the project sans json tests built with Show removed), but we
+-- leave it in -- changing the instance to PPrint -- in case it is useful
+-- in the future.
+instance PPrint AnnMap where
+  pprintTidy k (Ann ts es _ _) = pprintTidy k $ "\n\n"
                       ++ concatMap ppAnnotTyp (M.toList ts)
                       ++ concatMap ppAnnotErr [(x,y) | (x,y,_) <- es]
 

@@ -51,7 +51,6 @@ import           Language.Haskell.Liquid.Misc               (keyDiff)
 import           Control.DeepSeq
 import           Language.Haskell.Liquid.Types.Errors
 
-
 isAnonBinder :: Ghc.TyConBinder -> Bool
 isAnonBinder (Bndr _ (AnonTCB _)) = True
 isAnonBinder (Bndr _ _)           = False
@@ -271,10 +270,14 @@ srcSpanEndLoc :: RealSrcSpan -> Loc
 srcSpanEndLoc l    = L (srcSpanEndLine l, srcSpanEndCol l)
 
 locsSrcSpan :: Loc -> Loc -> RealSrcSpan
-locsSrcSpan start end = mkRealSrcSpan (locToRLoc start) (locToRLoc end)
-  where
-    locToRLoc :: Loc -> RealSrcLoc
-    locToRLoc (L (l, c)) = mkRealSrcLoc "" l c
+locsSrcSpan (L (startLine, startCol)) (L (endLine, endCol)) =
+  mkRealSrcSpanRaw "" startLine startCol endLine endCol
+
+mkRealSrcSpanRaw :: FastString -> Int -> Int -> Int -> Int -> RealSrcSpan
+mkRealSrcSpanRaw fileName startLine startCol endLine endCol =
+  mkRealSrcSpan
+    (mkRealSrcLoc fileName startLine startCol)
+    (mkRealSrcLoc fileName endLine endCol)
 
 realSrcSpanToSrcSpan :: RealSrcSpan -> SrcSpan
 realSrcSpanToSrcSpan r = RealSrcSpan r strictNothing

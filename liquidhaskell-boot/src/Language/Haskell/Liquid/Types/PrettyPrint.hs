@@ -137,10 +137,10 @@ instance (PPrint t) => PPrint (Annot t) where
 instance PPrint a => PPrint (AnnInfo a) where
   pprintTidy k (AI m) = vcat $ pprAnnInfoBinds k <$> M.toList m
 
-instance PPrint a => Show (AnnInfo a) where
-  show = showpp
+--instance PPrint a => Show (AnnInfo a) where
+--  show = showpp
 
-deriving instance PPrint a => Show (Output a)
+--deriving instance Show a => Show (Output a)
 
 pprAnnInfoBinds :: (PPrint a, PPrint b) => F.Tidy -> (SrcSpan, [(Maybe a, b)]) -> Doc
 pprAnnInfoBinds k (l, xvs)

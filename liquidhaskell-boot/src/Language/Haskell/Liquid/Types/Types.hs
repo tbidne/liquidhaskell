@@ -2310,7 +2310,7 @@ instance (F.PPrint t) => F.PPrint (HoleInfo  i t) where
 ------------------------------------------------------------------------
 
 newtype AnnInfo a = AI (M.HashMap SrcSpan [(Maybe Text, a)])
-                    deriving (Data, Typeable, Generic, Functor)
+                    deriving (Data, Eq, Typeable, Generic, Functor, Show)
 
 data Annot t
   = AnnUse t
@@ -2340,7 +2340,7 @@ data Output a = O
   , o_templs :: !(AnnInfo a)
   , o_bots   :: ![SrcSpan]
   , o_result :: ErrorResult
-  } deriving (Typeable, Generic, Functor)
+  } deriving (Eq, Typeable, Generic, Functor, Show)
 
 instance (F.PPrint a) => F.PPrint (Output a) where
   pprintTidy _ out = F.resultDoc (F.pprint <$> o_result out)
