@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP                       #-}
 {-# LANGUAGE FlexibleInstances         #-}
 {-# LANGUAGE NoMonomorphismRestriction #-}
 {-# LANGUAGE ScopedTypeVariables       #-}
@@ -50,8 +51,6 @@ import Control.Monad
 import Control.Monad.IO.Class
 import Data.Maybe
 import Data.Functor ((<&>))
-import Data.Aeson (encode)
-import qualified Data.ByteString.Lazy.Char8 as B
 import Development.GitRev (gitCommitCount)
 import qualified Paths_liquidhaskell_boot as Meta
 import System.Directory
@@ -87,7 +86,10 @@ import           Language.Haskell.TH.Syntax.Compat (fromCode, toCode)
 
 import Text.PrettyPrint.HughesPJ           hiding (Mode, (<>))
 
-
+#if USE_AESON
+import Data.Aeson (encode)
+import qualified Data.ByteString.Lazy.Char8 as B
+#endif
 
 ---------------------------------------------------------------------------------
 -- Config Magic Numbers----------------------------------------------------------
@@ -769,9 +771,13 @@ exitWithResult :: Config -> [FilePath] -> Output Doc -> IO ()
 exitWithResult cfg targets out = void $ reportResult writeResultStdout cfg targets out
 
 reportResultJson :: ACSS.AnnMap -> IO ()
-reportResultJson annm = do
+reportResultJson _annm = do
   putStrLn "LIQUID"
-  B.putStrLn . encode . annErrors $ annm
+#if USE_AESON
+  B.putStrLn . encode . annErrors $ _annm
+#else
+  putStrLn "Json functionality disabled. Rebuild with aeson flag enabled."
+#endif
 
 resultWithContext :: F.FixResult UserError -> IO (FixResult CError)
 resultWithContext (F.Unsafe s es)  = F.Unsafe s    <$> errorsWithContext es

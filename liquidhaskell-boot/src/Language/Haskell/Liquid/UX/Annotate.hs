@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP                        #-}
 {-# LANGUAGE FlexibleContexts           #-}
 {-# LANGUAGE NoMonomorphismRestriction  #-}
 {-# LANGUAGE OverloadedStrings          #-}
@@ -36,7 +37,6 @@ import           Data.Function                                (on)
 import           Data.List                                    (sortBy)
 import           Data.Maybe                                   (mapMaybe)
 
-import           Data.Aeson
 import           Control.Arrow                                hiding ((<+>))
 -- import           Control.Applicative      ((<$>))
 import           Control.Monad                                (when, forM_)
@@ -46,8 +46,6 @@ import           System.FilePath                              (takeFileName, dro
 import           System.Directory                             (findExecutable)
 import qualified System.Directory                             as Dir
 import qualified Data.List                                    as L
-import qualified Data.Vector                                  as V
-import qualified Data.ByteString.Lazy                         as B
 import qualified Data.Text                                    as T
 import qualified Data.HashMap.Strict                          as M
 import qualified Language.Haskell.Liquid.Misc                 as Misc
@@ -65,6 +63,12 @@ import           Language.Haskell.Liquid.Types.RefType
 import           Language.Haskell.Liquid.UX.Tidy
 import           Language.Haskell.Liquid.Types                hiding (Located(..), Def(..))
 -- import           Language.Haskell.Liquid.Types.Specifications
+
+#if USE_AESON
+import qualified Data.ByteString.Lazy                         as B
+import           Data.Aeson
+import qualified Data.Vector                                  as V
+#endif
 
 
 -- | @output@ creates the pretty printed output
@@ -109,13 +113,17 @@ doGenerate cfg tplAnnMap typAnnMap annTyp srcF
   = do generateHtml pandocF srcF tpHtmlF tplAnnMap
        generateHtml pandocF srcF tyHtmlF typAnnMap
        writeFile         vimF  $ vimAnnot cfg annTyp
+#if USE_AESON
+       let jsonF      = extFileName Json  srcF
        B.writeFile       jsonF $ encode typAnnMap
+#else
+       putStrLn "Json functionality disabled (enable with -faeson). Not writing json file."
+#endif
     where
        pandocF    = pandocHtml cfg
        tyHtmlF    = extFileName Html                   srcF
        tpHtmlF    = extFileName Html $ extFileName Cst srcF
        _annF      = extFileName Annot srcF
-       jsonF      = extFileName Json  srcF
        vimF       = extFileName Vim   srcF
 
 mkBots :: Reftable r => AnnInfo (RType c tv r) -> [GHC.SrcSpan]
@@ -408,6 +416,8 @@ vimBind (sp, (v, ann)) = printf "%d:%d-%d:%d::%s" l1 c1 l2 c2 (v ++ " :: " ++ sh
 -- | JSON Instances ----------------------------------------------------
 ------------------------------------------------------------------------
 
+#if USE_AESON
+
 instance ToJSON ACSS.Status where
   toJSON ACSS.Safe   = "safe"
   toJSON ACSS.Unsafe = "unsafe"
@@ -432,9 +442,6 @@ instance ToJSON AnnErrors where
                                    , "stop"    .= toJSON l'
                                    , "message" .= toJSON (dropErrorLoc s)
                                    ]
-
-
-
 
 dropErrorLoc :: String -> String
 dropErrorLoc msg
@@ -461,9 +468,6 @@ instance ToJSON ACSS.AnnMap where
                                , "ann"  .= toJSON t
                                ]
 
-annErrors :: ACSS.AnnMap -> AnnErrors
-annErrors = AnnErrors . ACSS.errors
-
 annTypes         :: ACSS.AnnMap -> AnnTypes
 annTypes a       = grp [(l, c, ann1 l c x s) | (l, c, x, s) <- binders']
   where
@@ -477,8 +481,13 @@ ins r c x (Asc m)  = Asc (M.insert r (Asc (M.insert c x rm)) m)
   where
     Asc rm         = M.lookupDefault (Asc M.empty) r m
 
+#endif
+
 tokeniseWithLoc :: String -> [(TokenType, String, Loc)]
 tokeniseWithLoc = ACSS.tokeniseWithLoc (Just tokAnnot)
+
+annErrors :: ACSS.AnnMap -> AnnErrors
+annErrors = AnnErrors . ACSS.errors
 
 --------------------------------------------------------------------------------
 -- | LH Related Stuff ----------------------------------------------------------

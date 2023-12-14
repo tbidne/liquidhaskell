@@ -1,3 +1,5 @@
+{-# LANGUAGE CPP #-}
+
 module Language.Haskell.Liquid.UX.Server (getType) where
 
 import           Prelude hiding (error)
@@ -10,8 +12,13 @@ import           Language.Fixpoint.Utils.Files
 import           System.Directory
 import           Data.Time.Clock (UTCTime)
 import qualified Control.Exception as Ex
+
+#if USE_AESON
 import           Data.Aeson
 import qualified Data.ByteString.Lazy   as B
+#else
+import           Data.Functor (($>))
+#endif
 
 -- data Time = TimeTodo deriving (Eq, Ord, Show)
 
@@ -53,6 +60,10 @@ getTypeInfo _ _ Nothing     = "ERROR: corrupt annotation info"
 getTypeInfo l c (Just info) = error "TODO: getTypeInfo"
 
 getAnnMap :: FilePath -> IO (Maybe A.AnnMap)
+#if USE_AESON
 getAnnMap srcF = decode <$> B.readFile jsonF
   where
     jsonF      = extFileName Json srcF
+#else
+getAnnMap _ = putStrLn "Aeson disabled" $> Nothing
+#endif

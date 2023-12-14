@@ -28,6 +28,11 @@ flag devel
   description: Enable more warnings and fail compilation when warnings occur.
                Turn this flag on in CI.
 
+flag aeson
+  description: Disables `aeson` functionality for fewer dependencies.
+  default: True
+  manual: False
+
 library
   autogen-modules:    Paths_liquidhaskell_boot
   exposed-modules:    Language.Haskell.Liquid.Cabal
@@ -123,7 +128,6 @@ library
 
   build-depends:      base                 >= 4.11.1.0 && < 5
                     , Diff                 >= 0.3 && < 0.5
-                    , aeson
                     , binary
                     , bytestring           >= 0.10
                     , Cabal                < 3.11
@@ -166,6 +170,11 @@ library
   default-language:   Haskell98
   default-extensions: PatternGuards, RecordWildCards, DoAndIfThenElse
   ghc-options:        -W -fwarn-missing-signatures
+
+  if flag(aeson)
+    build-depends:
+      , aeson
+    cpp-options: -DUSE_AESON
 
   if flag(devel)
     ghc-options:      -Wall -Werror

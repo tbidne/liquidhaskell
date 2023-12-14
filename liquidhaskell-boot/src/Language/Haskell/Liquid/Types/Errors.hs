@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP                 #-}
 {-# LANGUAGE FlexibleContexts    #-}
 {-# LANGUAGE FlexibleInstances   #-}
 {-# LANGUAGE OverloadedStrings   #-}
@@ -61,7 +62,6 @@ import           Data.Typeable                (Typeable)
 import           Data.Generics                (Data)
 import qualified Data.Binary                  as B
 import qualified Data.Maybe                   as Mb
-import           Data.Aeson                   hiding (Result)
 import           Data.Hashable
 import qualified Data.HashMap.Strict          as M
 import qualified Data.List                    as L
@@ -93,6 +93,10 @@ import qualified Language.Fixpoint.Misc       as Misc
 import qualified Language.Haskell.Liquid.Misc     as Misc
 import           Language.Haskell.Liquid.Misc ((<->))
 import           Language.Haskell.Liquid.Types.Generics()
+
+#if USE_AESON
+import           Data.Aeson                   hiding (Result)
+#endif
 
 type ParseError = P.ParseError String Void
 
@@ -680,6 +684,7 @@ ppPropInContext td p c
                 ]
       ]
 
+#if USE_AESON
 instance ToJSON RealSrcSpan where
   toJSON sp = object [ "filename"  .= f
                      , "startLine" .= l1
@@ -690,16 +695,6 @@ instance ToJSON RealSrcSpan where
     where
       (f, l1, c1, l2, c2) = unpackRealSrcSpan sp
 
-unpackRealSrcSpan :: RealSrcSpan -> (String, Int, Int, Int, Int)
-unpackRealSrcSpan rsp = (f, l1, c1, l2, c2)
-  where
-    f                 = unpackFS $ srcSpanFile rsp
-    l1                = srcSpanStartLine rsp
-    c1                = srcSpanStartCol  rsp
-    l2                = srcSpanEndLine   rsp
-    c2                = srcSpanEndCol    rsp
-
-
 instance FromJSON RealSrcSpan where
   parseJSON (Object v) =
     packRealSrcSpan
@@ -709,17 +704,6 @@ instance FromJSON RealSrcSpan where
       <*> v .: "endLine"
       <*> v .: "endCol"
   parseJSON _          = mempty
-
-packRealSrcSpan :: FilePath -> Int -> Int -> Int -> Int -> RealSrcSpan
-packRealSrcSpan f l1 c1 l2 c2 = mkRealSrcSpan loc1 loc2
-  where
-    loc1                  = mkRealSrcLoc (fsLit f) l1 c1
-    loc2                  = mkRealSrcLoc (fsLit f) l2 c2
-
-srcSpanFileMb :: SrcSpan -> Maybe FilePath
-srcSpanFileMb (RealSrcSpan s _) = Just $ unpackFS $ srcSpanFile s
-srcSpanFileMb _                 = Nothing
-
 
 instance ToJSON SrcSpan where
   toJSON (RealSrcSpan rsp _) = object [ "realSpan" .= True, "spanInfo" .= rsp ]
@@ -748,6 +732,26 @@ instance FromJSON (TError a) where
 
 errSaved :: SrcSpan -> String -> TError a
 errSaved sp body | n : m <- lines body = ErrSaved sp (text n) (text $ unlines m)
+#endif
+
+packRealSrcSpan :: FilePath -> Int -> Int -> Int -> Int -> RealSrcSpan
+packRealSrcSpan f l1 c1 l2 c2 = mkRealSrcSpan loc1 loc2
+  where
+    loc1                  = mkRealSrcLoc (fsLit f) l1 c1
+    loc2                  = mkRealSrcLoc (fsLit f) l2 c2
+
+srcSpanFileMb :: SrcSpan -> Maybe FilePath
+srcSpanFileMb (RealSrcSpan s _) = Just $ unpackFS $ srcSpanFile s
+srcSpanFileMb _                 = Nothing
+
+unpackRealSrcSpan :: RealSrcSpan -> (String, Int, Int, Int, Int)
+unpackRealSrcSpan rsp = (f, l1, c1, l2, c2)
+  where
+    f                 = unpackFS $ srcSpanFile rsp
+    l1                = srcSpanStartLine rsp
+    c1                = srcSpanStartCol  rsp
+    l2                = srcSpanEndLine   rsp
+    c2                = srcSpanEndCol    rsp
 
 totalityType :: PPrint a =>  Tidy -> a -> Bool
 totalityType td tE = pprintTidy td tE == text "{VV : Addr# | 5 < 4}"

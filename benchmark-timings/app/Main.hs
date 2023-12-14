@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE RecordWildCards #-}
@@ -10,15 +11,19 @@ module Main where
 import Data.String (fromString)
 import Prelude hiding (writeFile)
 import Data.Csv hiding (Options, Parser)
-import Data.Aeson hiding (Options)
 import GHC.Generics (Generic)
 import Options.Applicative
-import Data.Traversable (for)
-import Data.Maybe (catMaybes)
 
-import Data.ByteString.Lazy.Char8 (writeFile)
-import Data.List (foldl', intersperse, isSuffixOf)
+import Data.List (intersperse, isSuffixOf)
 import qualified Text.ParserCombinators.ReadP as ReadP
+
+#if USE_AESON
+import Data.Aeson hiding (Options)
+import Data.ByteString.Lazy.Char8 (writeFile)
+import qualified Data.List as F
+import Data.Maybe (catMaybes)
+import Data.Traversable (for)
+#endif
 
 data Phase = Phase
   { phaseTime :: Double
@@ -27,7 +32,9 @@ data Phase = Phase
   , phaseAlloc :: Int
   } deriving stock (Eq, Ord, Show, Generic)
 
+#if USE_AESON
 instance FromJSON Phase
+#endif
 
 data PhasesSummary = PhasesSummary
   { test :: String
@@ -83,18 +90,22 @@ dumpFilenameParser = do
   pure . mconcat $ intersperse "/" rest
 
 program :: Options -> IO ()
+#if USE_AESON
 program Options {..} = do
   csvFields <- for optsFilesToParse $ \fp ->
     case ReadP.readP_to_S dumpFilenameParser fp of
       (originalFilename, _):_ -> do
         Just (phases :: [Phase]) <- decodeFileStrict' fp
-        let time = foldl' (+) 0 [ phaseTime p | p <- phases, elem (init (phaseName p)) optsPhasesToCount ]
+        let time = F.foldl' (+) 0 [ phaseTime p | p <- phases, elem (init (phaseName p)) optsPhasesToCount ]
         -- convert milliseconds -> seconds
         pure . Just $ PhasesSummary originalFilename (time / 1000) True
       _ ->
         error $ "can't parse: " ++ show fp
   let csvData = encodeDefaultOrderedByNameWith (defaultEncodeOptions { encUseCrLf = False }) $ catMaybes csvFields
   writeFile optsOutputFile csvData
+#else
+program _ = putStrLn "Aeson disabled"
+#endif
 
 main :: IO ()
 main = program =<< execParser opts

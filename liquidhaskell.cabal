@@ -20,7 +20,7 @@ source-repository head
   location: https://github.com/ucsd-progsys/liquidhaskell/
 
 flag devel
-  default:     False
+  default:     True
   manual:      True
   description: Enable more warnings and fail compilation when warnings occur.
                Turn this flag on in CI.

@@ -3,6 +3,7 @@
 --   modified since it was last checked, as determined by a diff against
 --   a saved version of the file.
 
+{-# LANGUAGE CPP               #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE FlexibleContexts  #-}
 {-# LANGUAGE FlexibleInstances #-}
@@ -39,16 +40,14 @@ module Language.Haskell.Liquid.UX.DiffCheck (
 
 
 import           Prelude                                hiding (error)
-import           Data.Aeson
-import qualified Data.Text                              as T
 import           Data.Algorithm.Diff
-import           Data.Maybe                             (maybeToList, listToMaybe, mapMaybe, fromMaybe)
+import           Data.Maybe                             (maybeToList, listToMaybe, mapMaybe)
 import qualified Data.IntervalMap.FingerTree            as IM
 import qualified Data.HashSet                           as S
 import qualified Data.HashMap.Strict                    as M
 import qualified Data.List                              as L
 import           System.Directory                       (copyFile, doesFileExist)
-import           Language.Fixpoint.Types                (atLoc, FixResult (..), SourcePos(..), safeSourcePos, unPos)
+import           Language.Fixpoint.Types                (atLoc, FixResult (..), SourcePos(..), unPos)
 -- import qualified Language.Fixpoint.Misc                 as Misc
 import           Language.Fixpoint.Utils.Files
 import           Language.Fixpoint.Solver.Stats ()
@@ -56,11 +55,19 @@ import           Language.Haskell.Liquid.Misc           (mkGraph)
 import           Language.Haskell.Liquid.GHC.Misc
 import           Liquid.GHC.API        as Ghc hiding
   (Located, line, sourceName, text, panic, showPpr)
-import           Text.PrettyPrint.HughesPJ              (text, render, Doc)
+import           Text.PrettyPrint.HughesPJ              (text, Doc)
 import qualified Data.ByteString                        as B
-import qualified Data.ByteString.Lazy                   as LB
 
 import           Language.Haskell.Liquid.Types          hiding (Def, LMap)
+
+#if USE_AESON
+import           Data.Aeson
+import qualified Data.ByteString.Lazy                   as LB
+import qualified Data.Maybe as Maybe
+import qualified Data.Text                              as T
+import qualified Language.Fixpoint.Types as FTypes
+import qualified Text.PrettyPrint.HughesPJ as HughesPJ
+#endif
 
 --------------------------------------------------------------------------------
 -- | Data Types ----------------------------------------------------------------
@@ -475,12 +482,16 @@ diffShifts = go 1 1
 --------------------------------------------------------------------------------
 saveResult :: FilePath -> Output Doc -> IO ()
 --------------------------------------------------------------------------------
-saveResult target res = do
+saveResult target _res = do
   copyFile target saveF
-  B.writeFile errF $ LB.toStrict $ encode res
+#if USE_AESON
+  B.writeFile _errF $ LB.toStrict $ encode _res
+#else
+  putStrLn "Aeson functionality disabled."
+#endif
   where
     saveF = extFileName Saved  target
-    errF  = extFileName Cache  target
+    _errF  = extFileName Cache  target
 
 --------------------------------------------------------------------------------
 loadResult   :: FilePath -> IO (Output Doc)
@@ -488,10 +499,16 @@ loadResult   :: FilePath -> IO (Output Doc)
 loadResult f = do
   ex <- doesFileExist jsonF
   if ex
-    then convert <$> B.readFile jsonF
+    then B.readFile jsonF >>= convert
     else return mempty
   where
-    convert  = fromMaybe mempty . decode . LB.fromStrict
+#if USE_AESON
+    convert  = pure . Maybe.fromMaybe mempty . decode . LB.fromStrict
+#else
+    convert _ = do
+      putStrLn "Aeson disabled"
+      mempty
+#endif
     jsonF    = extFileName Cache f
 
 --------------------------------------------------------------------------------
@@ -568,6 +585,8 @@ checkedItv chDefs = foldr (`IM.insert` ()) IM.empty is
 -- | Aeson instances -----------------------------------------------------------
 --------------------------------------------------------------------------------
 
+#if USE_AESON
+
 instance ToJSON SourcePos where
   toJSON p = object [   "sourceName"   .= f
                       , "sourceLine"   .= unPos l
@@ -579,7 +598,7 @@ instance ToJSON SourcePos where
                c    = sourceColumn p
 
 instance FromJSON SourcePos where
-  parseJSON (Object v) = safeSourcePos <$> v .: "sourceName"
+  parseJSON (Object v) = FTypes.safeSourcePos <$> v .: "sourceName"
                                 <*> v .: "sourceLine"
                                 <*> v .: "sourceColumn"
   parseJSON _          = mempty
@@ -587,7 +606,7 @@ instance FromJSON SourcePos where
 instance FromJSON ErrorResult
 
 instance ToJSON Doc where
-  toJSON = String . T.pack . render
+  toJSON = String . T.pack . HughesPJ.render
 
 instance FromJSON Doc where
   parseJSON (String s) = return $ text $ T.unpack s
@@ -603,6 +622,8 @@ instance ToJSON (Output Doc) where
   toEncoding = genericToEncoding defaultOptions
 instance FromJSON (Output Doc) where
   parseJSON = genericParseJSON defaultOptions
+
+#endif
 
 file :: Located a -> FilePath
 file = sourceName . loc

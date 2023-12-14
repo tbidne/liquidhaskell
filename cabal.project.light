@@ -1,0 +1,50 @@
+-- Should be kept in sync with cabal.project, with optional dependencies
+-- disabled i.e.
+--
+-- liquid-fixpoint: -aeson
+-- liquidhaskell-boot: -aeson
+-- benchmark-timings: -aeson
+
+with-compiler: ghc-9.6.3
+
+packages: .
+          ./liquid-fixpoint
+          ./liquid-parallel
+          ./liquid-prelude
+          ./liquid-vector
+          ./liquid-platform
+          ./liquidhaskell-boot
+          ./tests
+          ./tests/benchmarks/popl18/lib
+          ./benchmark-timings
+          ./scripts/plot-performance
+          ./scripts/profiling-driver
+
+source-repository-package
+    type: git
+    location: https://github.com/qnikst/ghc-timings-report
+    tag: 45ef3498e35897712bde8e002ce18df6d55f8b15
+
+source-repository-package
+    type: git
+    location: https://github.com/timbod7/haskell-chart/
+    tag: ba85444d3c81774a43b8c2b046084e92869914f4
+    subdir: chart
+
+allow-newer: ghc-timings:base, rest-rewrite:time, Chart:lens
+
+package benchmark-timings
+  flags: -aeson
+
+package liquid-fixpoint
+  flags: +devel -aeson
+
+package liquidhaskell
+  ghc-options: -j
+
+package liquidhaskell-boot
+  flags: -aeson
+  ghc-options: -j
+
+package liquid-platform
+  flags: +devel
